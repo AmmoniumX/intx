@@ -22,6 +22,9 @@
 #include <string>
 #include <tuple>
 #include <type_traits>
+#if defined(__cpp_lib_unreachable)
+#include <utility> // std::unreachable
+#endif
 
 #ifdef _MSC_VER
     #pragma warning(push)
@@ -63,10 +66,11 @@
 namespace intx
 {
 /// Mark a possible code path as unreachable (invokes undefined behavior).
-/// TODO(C++23): Use std::unreachable().
 [[noreturn]] inline void unreachable() noexcept
 {
-#if __has_builtin(__builtin_unreachable)
+#if defined(__cpp_lib_unreachable)
+    std::unreachable();
+#elif __has_builtin(__builtin_unreachable)
     __builtin_unreachable();
 #elif defined(_MSC_VER)
     __assume(false);
@@ -79,6 +83,7 @@ namespace intx
 
 /// Alias for the compiler supported unsigned __int128 type.
 using builtin_uint128 = unsigned __int128;
+using builtin_int128 = __int128;
 
     #pragma GCC diagnostic pop
 #endif
@@ -1925,6 +1930,369 @@ inline void store(uint8_t* dst, const uint256& x) noexcept
 }  // namespace unsafe
 
 }  // namespace be
+
+// Signed types
+template<unsigned N>
+struct sint : private uint<N> {
+  using internal = uint<N>;
+  using internal::word_type;
+  using internal::word_num_bits;
+  using internal::num_bits;
+  using internal::num_words;
+
+private:
+  using internal::words_;
+
+public:
+  constexpr sint() noexcept = default;
+
+  // Implicit converting constructor for any smaller int type
+  template <unsigned M>
+  constexpr explicit(false) sint(const sint<M>& x) noexcept
+      requires(M < N)
+  {
+      for (size_t i = 0; i < sint<M>::num_words; ++i)
+          words_[i] = x[i];
+  }
+
+#if INTX_HAS_BUILTIN_INT128
+    constexpr explicit(false) sint(builtin_int128 x) noexcept
+      : internal{uint64_t(x), uint64_t(x >> 64)}
+    {}
+#endif
+
+    template <typename... T>
+    constexpr explicit(false) sint(T... v) noexcept
+        requires std::conjunction_v<std::is_convertible<T, uint64_t>...>
+      : internal{static_cast<uint64_t>(v)...}
+    {}
+
+    /// Constructs from words with words[0] being the least significant word.
+    /// The size of the span must be less than or equal to num_words.
+    constexpr explicit sint(std::span<const uint64_t> words) noexcept
+    {
+        INTX_REQUIRE(words.size() <= num_words);
+        std::ranges::copy(words, words_);
+    }
+
+    // This is just to get each words, it won't mean much by themselves since it's
+    // part of a signed type
+    constexpr uint64_t& operator[](size_t i) noexcept { return words_[i]; }
+
+    constexpr const uint64_t& operator[](size_t i) const noexcept { return words_[i]; }
+
+    constexpr explicit operator bool() const noexcept { return *this != sint{}; }
+
+    /// Explicit converting operator to smaller sint types.
+    template <unsigned M>
+    constexpr explicit operator sint<M>() const noexcept
+        requires(M < N)
+    {
+        sint<M> r;
+        for (size_t i = 0; i < sint<M>::num_words; ++i)
+            r[i] = words_[i];
+        return r;
+    }
+
+    /// Explicit converting operator for all builtin integral types.
+    template <typename Int>
+    constexpr explicit operator Int() const noexcept
+        requires(std::is_integral_v<Int>)
+    {
+        static_assert(sizeof(Int) <= sizeof(uint64_t));
+        return static_cast<Int>(words_[0]);
+    }
+
+    constexpr sint& operator=(uint64_t v) noexcept
+    {
+        words_[0] = v;
+        for (size_t i = 1; i < num_words; ++i)
+            words_[i] = 0;
+        return *this;
+    }
+
+    template <unsigned M>
+    constexpr sint& operator=(const sint<M>& x) noexcept
+        requires(M <= N)
+    {
+        for (size_t i = 0; i < sint<M>::num_words; ++i)
+            words_[i] = x[i];
+        for (size_t i = sint<M>::num_words; i < num_words; ++i)
+            words_[i] = 0;
+        return *this;
+    }
+
+    friend constexpr sint operator+(const sint& x, const sint& y) noexcept
+    {
+      static_assert(false, "TODO");
+      // return addc(x, y).value;
+    }
+
+    constexpr sint& operator+=(const sint& y) noexcept { return *this = *this + y; }
+
+    constexpr sint operator-() const noexcept { return ~*this + sint{1}; }
+
+    friend constexpr sint operator-(const sint& x, const sint& y) noexcept
+    {
+      static_assert(false, "TODO");  
+      // return subc(x, y).value;
+    }
+
+    constexpr sint& operator-=(const sint& y) noexcept { return *this = *this - y; }
+
+    /// Multiplication implementation using word access
+    /// and discarding the high part of the result product.
+    friend constexpr sint operator*(const sint& x, const sint& y) noexcept
+    {
+        static_assert(false, "TODO");
+        
+        // uint<N> p;
+        // for (size_t j = 0; j < num_words; j++)
+        // {
+        //     uint64_t k = 0;
+        //     for (size_t i = 0; i < (num_words - j - 1); i++)
+        //     {
+        //         auto a = addc(p[i + j], k);
+        //         auto t = umul(x[i], y[j]) + uint128{a.value, a.carry};
+        //         p[i + j] = t[0];
+        //         k = t[1];
+        //     }
+        //     p[num_words - 1] += x[num_words - j - 1] * y[j] + k;
+        // }
+        // return p;
+    }
+
+    constexpr sint& operator*=(const sint& y) noexcept { return *this = *this * y; }
+
+    friend constexpr sint operator/(const sint& x, const sint& y) noexcept
+    {
+        static_assert(false, "TODO");
+        // return udivrem(x, y).quot;
+    }
+
+    friend constexpr sint operator%(const sint& x, const sint& y) noexcept
+    {
+        static_assert(false, "TODO");
+        // return udivrem(x, y).rem;
+    }
+
+    constexpr sint& operator/=(const sint& y) noexcept { return *this = *this / y; }
+
+    constexpr sint& operator%=(const sint& y) noexcept { return *this = *this % y; }
+
+
+    constexpr sint operator~() const noexcept
+    {
+        uint z;
+        for (size_t i = 0; i < num_words; ++i)
+            z[i] = ~words_[i];
+        return z;
+    }
+
+    friend constexpr sint operator|(const sint& x, const sint& y) noexcept
+    {
+        uint z;
+        for (size_t i = 0; i < num_words; ++i)
+            z[i] = x[i] | y[i];
+        return z;
+    }
+
+    constexpr sint& operator|=(const sint& y) noexcept { return *this = *this | y; }
+
+    friend constexpr sint operator&(const sint& x, const sint& y) noexcept
+    {
+        uint z;
+        for (size_t i = 0; i < num_words; ++i)
+            z[i] = x[i] & y[i];
+        return z;
+    }
+
+    constexpr sint& operator&=(const sint& y) noexcept { return *this = *this & y; }
+
+    friend constexpr sint operator^(const sint& x, const sint& y) noexcept
+    {
+        uint z;
+        for (size_t i = 0; i < num_words; ++i)
+            z[i] = x[i] ^ y[i];
+        return z;
+    }
+
+    constexpr sint& operator^=(const sint& y) noexcept { return *this = *this ^ y; }
+
+    friend constexpr bool operator==(const sint& x, const sint& y) noexcept
+    {
+        uint64_t folded = 0;
+        for (size_t i = 0; i < num_words; ++i)
+            folded |= (x[i] ^ y[i]);
+        return folded == 0;
+    }
+
+    friend constexpr bool operator<(const sint& x, const sint& y) noexcept
+    {
+       static_assert(false, "TODO"); 
+        // if constexpr (N == 256)
+        // {
+        //     auto xp = uint128{x[2], x[3]};
+        //     auto yp = uint128{y[2], y[3]};
+        //     if (xp == yp)
+        //     {
+        //         xp = uint128{x[0], x[1]};
+        //         yp = uint128{y[0], y[1]};
+        //     }
+        //     return xp < yp;
+        // }
+        // else
+        //     return subc(x, y).carry;
+    }
+    friend constexpr bool operator>(const sint& x, const sint& y) noexcept { return y < x; }
+    friend constexpr bool operator>=(const sint& x, const sint& y) noexcept { return !(x < y); }
+    friend constexpr bool operator<=(const sint& x, const sint& y) noexcept { return !(y < x); }
+
+    friend constexpr std::strong_ordering operator<=>(const sint& x, const sint& y) noexcept
+    {
+        if (x == y)
+            return std::strong_ordering::equal;
+
+        return (x < y) ? std::strong_ordering::less : std::strong_ordering::greater;
+    }
+
+    friend constexpr sint operator<<(const sint& x, uint64_t shift) noexcept
+    {
+        if (shift >= num_bits) [[unlikely]]
+            return 0;
+
+        if constexpr (N == 256)
+        {
+            constexpr auto half_bits = num_bits / 2;
+
+            const auto xlo = uint128{x[0], x[1]};
+
+            if (shift < half_bits)
+            {
+                const auto lo = xlo << shift;
+
+                const auto xhi = uint128{x[2], x[3]};
+
+                // Find the part moved from lo to hi.
+                // The shift right here can be invalid:
+                // for shift == 0 => rshift == half_bits.
+                // Split it into 2 valid shifts by (rshift - 1) and 1.
+                const auto rshift = half_bits - shift;
+                const auto lo_overflow = (xlo >> (rshift - 1)) >> 1;
+                const auto hi = (xhi << shift) | lo_overflow;
+                return {lo[0], lo[1], hi[0], hi[1]};
+            }
+
+            const auto hi = xlo << (shift - half_bits);
+            return {0, 0, hi[0], hi[1]};
+        }
+        else
+        {
+            constexpr auto word_bits = sizeof(uint64_t) * 8;
+
+            const auto s = shift % word_bits;
+            const auto skip = static_cast<size_t>(shift / word_bits);
+
+            sint r;
+            uint64_t carry = 0;
+            for (size_t i = 0; i < (num_words - skip); ++i)
+            {
+                r[i + skip] = (x[i] << s) | carry;
+                carry = (x[i] >> (word_bits - s - 1)) >> 1;
+            }
+            return r;
+        }
+    }
+
+    friend constexpr sint operator<<(const sint& x, std::integral auto shift) noexcept
+    {
+        static_assert(sizeof(shift) <= sizeof(uint64_t));
+        return x << static_cast<uint64_t>(shift);
+    }
+
+    friend constexpr sint operator<<(const sint& x, const sint& shift) noexcept
+    {
+        // TODO: This optimisation should be handled by operator<.
+        uint64_t high_words_fold = 0;
+        for (size_t i = 1; i < num_words; ++i)
+            high_words_fold |= shift[i];
+
+        if (high_words_fold != 0) [[unlikely]]
+            return 0;
+
+        return x << shift[0];
+    }
+
+    friend constexpr sint operator>>(const sint& x, uint64_t shift) noexcept
+    {
+        if (shift >= num_bits) [[unlikely]]
+            return 0;
+
+        if constexpr (N == 256)
+        {
+            constexpr auto half_bits = num_bits / 2;
+
+            const auto xhi = uint128{x[2], x[3]};
+
+            if (shift < half_bits)
+            {
+                const auto hi = xhi >> shift;
+
+                const auto xlo = uint128{x[0], x[1]};
+
+                // Find the part moved from hi to lo.
+                // The shift left here can be invalid:
+                // for shift == 0 => lshift == half_bits.
+                // Split it into 2 valid shifts by (lshift - 1) and 1.
+                const auto lshift = half_bits - shift;
+                const auto hi_overflow = (xhi << (lshift - 1)) << 1;
+                const auto lo = (xlo >> shift) | hi_overflow;
+                return {lo[0], lo[1], hi[0], hi[1]};
+            }
+
+            const auto lo = xhi >> (shift - half_bits);
+            return {lo[0], lo[1], 0, 0};
+        }
+        else
+        {
+            constexpr auto word_bits = sizeof(uint64_t) * 8;
+
+            const auto s = shift % word_bits;
+            const auto skip = static_cast<size_t>(shift / word_bits);
+
+            sint r;
+            uint64_t carry = 0;
+            for (size_t i = 0; i < (num_words - skip); ++i)
+            {
+                r[num_words - 1 - i - skip] = (x[num_words - 1 - i] >> s) | carry;
+                carry = (x[num_words - 1 - i] << (word_bits - s - 1)) << 1;
+            }
+            return r;
+        }
+    }
+
+    friend constexpr sint operator>>(const sint& x, std::integral auto shift) noexcept
+    {
+        static_assert(sizeof(shift) <= sizeof(uint64_t));
+        return x >> static_cast<uint64_t>(shift);
+    }
+
+    friend constexpr sint operator>>(const sint& x, const sint& shift) noexcept
+    {
+        // TODO check if correct
+        uint64_t high_words_fold = 0;
+        for (size_t i = 1; i < num_words; ++i)
+            high_words_fold |= shift[i];
+
+        if (high_words_fold != 0) [[unlikely]]
+            return 0;
+
+        return x >> shift[0];
+    }
+
+    constexpr sint& operator<<=(sint shift) noexcept { return *this = *this << shift; }
+    constexpr sint& operator>>=(sint shift) noexcept { return *this = *this >> shift; }
+};
 
 }  // namespace intx
 
