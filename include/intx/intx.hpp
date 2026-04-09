@@ -2293,6 +2293,7 @@ public:
     constexpr sint& operator<<=(sint shift) noexcept { return *this = *this << shift; }
     constexpr sint& operator>>=(sint shift) noexcept { return *this = *this >> shift; }
 };
+using int128 = sint<128>;
 
 }  // namespace intx
 
