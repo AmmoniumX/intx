@@ -23,7 +23,7 @@
 #include <tuple>
 #include <type_traits>
 #if defined(__cpp_lib_unreachable)
-#include <utility> // std::unreachable
+    #include <utility>  // std::unreachable
 #endif
 
 #ifdef _MSC_VER
@@ -1933,30 +1933,31 @@ inline void store(uint8_t* dst, const uint256& x) noexcept
 }  // namespace be
 
 // Signed types
-template<unsigned N>
-struct sint : private uint<N> {
-  using internal = uint<N>;
-  using typename internal::word_type;
-  using internal::word_num_bits;
-  using internal::num_bits;
-  using internal::num_words;
+template <unsigned N>
+struct sint : private uint<N>
+{
+    using internal = uint<N>;
+    using internal::num_bits;
+    using internal::num_words;
+    using internal::word_num_bits;
+    using typename internal::word_type;
 
 private:
-  using internal::words_;
+    using internal::words_;
 
-  constexpr explicit sint(const internal& u) noexcept : internal{u} {}
+    constexpr explicit sint(const internal& u) noexcept : internal{u} {}
 
 public:
-  constexpr sint() noexcept = default;
+    constexpr sint() noexcept = default;
 
-  // Implicit converting constructor for any smaller int type
-  template <unsigned M>
-  constexpr explicit(false) sint(const sint<M>& x) noexcept
-      requires(M < N)
-  {
-      for (size_t i = 0; i < sint<M>::num_words; ++i)
-          words_[i] = x[i];
-  }
+    // Implicit converting constructor for any smaller int type
+    template <unsigned M>
+    constexpr explicit(false) sint(const sint<M>& x) noexcept
+        requires(M < N)
+    {
+        for (size_t i = 0; i < sint<M>::num_words; ++i)
+            words_[i] = x[i];
+    }
 
 #if INTX_HAS_BUILTIN_INT128
     constexpr explicit(false) sint(builtin_int128 x) noexcept
@@ -2199,9 +2200,8 @@ public:
     {
         constexpr auto word_bits = sizeof(uint64_t) * 8;
         // Replicate the sign bit across a full word: 0 for positive, all-ones for negative.
-        const auto sign_fill = static_cast<uint64_t>(
-            -static_cast<int64_t>(x[num_words - 1] >> (word_bits - 1))
-            );
+        const auto sign_fill =
+            static_cast<uint64_t>(-static_cast<int64_t>(x[num_words - 1] >> (word_bits - 1)));
 
         if (shift >= num_bits) [[unlikely]]
         {
@@ -2247,9 +2247,8 @@ public:
         {
             // Shift amount >= 2^64 >= num_bits: result is all sign bits.
             constexpr auto word_bits = sizeof(uint64_t) * 8;
-            const auto sign_fill = static_cast<uint64_t>(
-              -static_cast<int64_t>(x[num_words - 1] >> (word_bits - 1))
-              );
+            const auto sign_fill =
+                static_cast<uint64_t>(-static_cast<int64_t>(x[num_words - 1] >> (word_bits - 1)));
             sint r;
             for (size_t i = 0; i < num_words; ++i)
                 r[i] = sign_fill;
@@ -2273,7 +2272,7 @@ inline std::string to_string(sint<N> x, int base = 10)
     if (x >= 0)
     {
         uint<N> ux;
-        for (size_t i = 0; i < sint<N>::num_words; ++i) 
+        for (size_t i = 0; i < sint<N>::num_words; ++i)
             ux[i] = x[i];
         return to_string(ux, base);
     }
@@ -2283,7 +2282,7 @@ inline std::string to_string(sint<N> x, int base = 10)
     // which correctly represents the magnitude 2^(N-1) when stored in uint.
     auto abs_x = -x;
     uint<N> ux;
-    for (size_t i = 0; i < sint<N>::num_words; ++i) 
+    for (size_t i = 0; i < sint<N>::num_words; ++i)
         ux[i] = abs_x[i];
 
     return "-" + to_string(ux, base);
