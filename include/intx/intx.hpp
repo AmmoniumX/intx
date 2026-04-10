@@ -1943,6 +1943,8 @@ struct sint : private uint<N> {
 private:
   using internal::words_;
 
+  constexpr explicit sint(const internal& u) noexcept : internal{u} {}
+
 public:
   constexpr sint() noexcept = default;
 
@@ -2024,8 +2026,7 @@ public:
 
     friend constexpr sint operator+(const sint& x, const sint& y) noexcept
     {
-      static_assert(false, "TODO");
-      // return addc(x, y).value;
+        return sint{addc(static_cast<const internal&>(x), static_cast<const internal&>(y)).value};
     }
 
     constexpr sint& operator+=(const sint& y) noexcept { return *this = *this + y; }
@@ -2034,46 +2035,29 @@ public:
 
     friend constexpr sint operator-(const sint& x, const sint& y) noexcept
     {
-      static_assert(false, "TODO");  
-      // return subc(x, y).value;
+        return sint{subc(static_cast<const internal&>(x), static_cast<const internal&>(y)).value};
     }
 
     constexpr sint& operator-=(const sint& y) noexcept { return *this = *this - y; }
 
     /// Multiplication implementation using word access
     /// and discarding the high part of the result product.
+    /// For two's complement, the low N bits of the product are the same as unsigned.
     friend constexpr sint operator*(const sint& x, const sint& y) noexcept
     {
-        static_assert(false, "TODO");
-        
-        // uint<N> p;
-        // for (size_t j = 0; j < num_words; j++)
-        // {
-        //     uint64_t k = 0;
-        //     for (size_t i = 0; i < (num_words - j - 1); i++)
-        //     {
-        //         auto a = addc(p[i + j], k);
-        //         auto t = umul(x[i], y[j]) + uint128{a.value, a.carry};
-        //         p[i + j] = t[0];
-        //         k = t[1];
-        //     }
-        //     p[num_words - 1] += x[num_words - j - 1] * y[j] + k;
-        // }
-        // return p;
+        return sint{static_cast<const internal&>(x) * static_cast<const internal&>(y)};
     }
 
     constexpr sint& operator*=(const sint& y) noexcept { return *this = *this * y; }
 
     friend constexpr sint operator/(const sint& x, const sint& y) noexcept
     {
-        static_assert(false, "TODO");
-        // return udivrem(x, y).quot;
+        return sint{sdivrem(static_cast<const internal&>(x), static_cast<const internal&>(y)).quot};
     }
 
     friend constexpr sint operator%(const sint& x, const sint& y) noexcept
     {
-        static_assert(false, "TODO");
-        // return udivrem(x, y).rem;
+        return sint{sdivrem(static_cast<const internal&>(x), static_cast<const internal&>(y)).rem};
     }
 
     constexpr sint& operator/=(const sint& y) noexcept { return *this = *this / y; }
@@ -2083,7 +2067,7 @@ public:
 
     constexpr sint operator~() const noexcept
     {
-        uint z;
+        sint z;
         for (size_t i = 0; i < num_words; ++i)
             z[i] = ~words_[i];
         return z;
@@ -2091,7 +2075,7 @@ public:
 
     friend constexpr sint operator|(const sint& x, const sint& y) noexcept
     {
-        uint z;
+        sint z;
         for (size_t i = 0; i < num_words; ++i)
             z[i] = x[i] | y[i];
         return z;
@@ -2101,7 +2085,7 @@ public:
 
     friend constexpr sint operator&(const sint& x, const sint& y) noexcept
     {
-        uint z;
+        sint z;
         for (size_t i = 0; i < num_words; ++i)
             z[i] = x[i] & y[i];
         return z;
@@ -2111,7 +2095,7 @@ public:
 
     friend constexpr sint operator^(const sint& x, const sint& y) noexcept
     {
-        uint z;
+        sint z;
         for (size_t i = 0; i < num_words; ++i)
             z[i] = x[i] ^ y[i];
         return z;
@@ -2129,20 +2113,7 @@ public:
 
     friend constexpr bool operator<(const sint& x, const sint& y) noexcept
     {
-       static_assert(false, "TODO"); 
-        // if constexpr (N == 256)
-        // {
-        //     auto xp = uint128{x[2], x[3]};
-        //     auto yp = uint128{y[2], y[3]};
-        //     if (xp == yp)
-        //     {
-        //         xp = uint128{x[0], x[1]};
-        //         yp = uint128{y[0], y[1]};
-        //     }
-        //     return xp < yp;
-        // }
-        // else
-        //     return subc(x, y).carry;
+        return slt(static_cast<const internal&>(x), static_cast<const internal&>(y));
     }
     friend constexpr bool operator>(const sint& x, const sint& y) noexcept { return y < x; }
     friend constexpr bool operator>=(const sint& x, const sint& y) noexcept { return !(x < y); }
@@ -2225,50 +2196,36 @@ public:
 
     friend constexpr sint operator>>(const sint& x, uint64_t shift) noexcept
     {
+        constexpr auto word_bits = sizeof(uint64_t) * 8;
+        // Replicate the sign bit across a full word: 0 for positive, all-ones for negative.
+        const auto sign_fill = -(x[num_words - 1] >> (word_bits - 1));
+
         if (shift >= num_bits) [[unlikely]]
-            return 0;
-
-        if constexpr (N == 256)
         {
-            constexpr auto half_bits = num_bits / 2;
-
-            const auto xhi = uint128{x[2], x[3]};
-
-            if (shift < half_bits)
-            {
-                const auto hi = xhi >> shift;
-
-                const auto xlo = uint128{x[0], x[1]};
-
-                // Find the part moved from hi to lo.
-                // The shift left here can be invalid:
-                // for shift == 0 => lshift == half_bits.
-                // Split it into 2 valid shifts by (lshift - 1) and 1.
-                const auto lshift = half_bits - shift;
-                const auto hi_overflow = (xhi << (lshift - 1)) << 1;
-                const auto lo = (xlo >> shift) | hi_overflow;
-                return {lo[0], lo[1], hi[0], hi[1]};
-            }
-
-            const auto lo = xhi >> (shift - half_bits);
-            return {lo[0], lo[1], 0, 0};
-        }
-        else
-        {
-            constexpr auto word_bits = sizeof(uint64_t) * 8;
-
-            const auto s = shift % word_bits;
-            const auto skip = static_cast<size_t>(shift / word_bits);
-
             sint r;
-            uint64_t carry = 0;
-            for (size_t i = 0; i < (num_words - skip); ++i)
-            {
-                r[num_words - 1 - i - skip] = (x[num_words - 1 - i] >> s) | carry;
-                carry = (x[num_words - 1 - i] << (word_bits - s - 1)) << 1;
-            }
+            for (size_t i = 0; i < num_words; ++i)
+                r[i] = sign_fill;
             return r;
         }
+
+        const auto s = shift % word_bits;
+        const auto skip = static_cast<size_t>(shift / word_bits);
+
+        sint r;
+        // For s > 0: prime the carry with sign bits so the top s bits of the MSW are filled.
+        // For s == 0: no sub-word carry is needed (sign_fill << word_bits would be UB).
+        uint64_t carry = s != 0 ? (sign_fill << (word_bits - s)) : 0;
+        for (size_t i = 0; i < (num_words - skip); ++i)
+        {
+            r[num_words - 1 - i - skip] = (x[num_words - 1 - i] >> s) | carry;
+            // The trick (x << (word_bits - s - 1)) << 1 avoids UB when s == 0
+            // (equivalent to x << word_bits, which yields 0).
+            carry = (x[num_words - 1 - i] << (word_bits - s - 1)) << 1;
+        }
+        // Fill the vacated high words with the sign.
+        for (size_t i = num_words - skip; i < num_words; ++i)
+            r[i] = sign_fill;
+        return r;
     }
 
     friend constexpr sint operator>>(const sint& x, std::integral auto shift) noexcept
@@ -2279,13 +2236,20 @@ public:
 
     friend constexpr sint operator>>(const sint& x, const sint& shift) noexcept
     {
-        // TODO check if correct
         uint64_t high_words_fold = 0;
         for (size_t i = 1; i < num_words; ++i)
             high_words_fold |= shift[i];
 
         if (high_words_fold != 0) [[unlikely]]
-            return 0;
+        {
+            // Shift amount >= 2^64 >= num_bits: result is all sign bits.
+            constexpr auto word_bits = sizeof(uint64_t) * 8;
+            const auto sign_fill = -(x[num_words - 1] >> (word_bits - 1));
+            sint r;
+            for (size_t i = 0; i < num_words; ++i)
+                r[i] = sign_fill;
+            return r;
+        }
 
         return x >> shift[0];
     }
