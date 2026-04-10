@@ -257,7 +257,7 @@ constexpr int128 one = 1;
 constexpr int128 neg_one = -int128{1};
 
 static_assert(neg_one + one == 0);
-static_assert(one - one == 0);
+static_assert(one - one == 0);  // NOLINT(misc-redundant-expression): part of the test
 static_assert(neg_one * neg_one == one);
 static_assert(neg_one * one == neg_one);
 static_assert(int128{3} * int128{4} == int128{12});
