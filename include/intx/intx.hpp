@@ -220,7 +220,7 @@ struct uint<128>
     static constexpr unsigned num_bits = 128;
     static constexpr auto num_words = num_bits / word_num_bits;
 
-private:
+protected:
     uint64_t words_[2]{};
 
 public:
@@ -881,6 +881,7 @@ inline std::string to_string(uint<N> x, int base = 10)
     return s;
 }
 
+
 template <unsigned N>
 inline std::string hex(uint<N> x)
 {
@@ -898,7 +899,7 @@ struct uint
     static_assert(N >= 2 * word_num_bits, "Number of bits must be at lest 128");
     static_assert(N % word_num_bits == 0, "Number of bits must be a multiply of 64");
 
-private:
+protected:
     uint64_t words_[num_words]{};
 
 public:
@@ -1935,7 +1936,7 @@ inline void store(uint8_t* dst, const uint256& x) noexcept
 template<unsigned N>
 struct sint : private uint<N> {
   using internal = uint<N>;
-  using internal::word_type;
+  using typename internal::word_type;
   using internal::word_num_bits;
   using internal::num_bits;
   using internal::num_words;
@@ -2258,6 +2259,37 @@ public:
     constexpr sint& operator>>=(sint shift) noexcept { return *this = *this >> shift; }
 };
 using int128 = sint<128>;
+using int256 = sint<256>;
+using int512 = sint<512>;
+
+template <unsigned N>
+inline std::string to_string(sint<N> x, int base = 10)
+{
+    // Handle the positive case and zero directly by converting to uint<N>
+    if (x >= 0)
+    {
+        uint<N> ux;
+        for (size_t i = 0; i < sint<N>::num_words; ++i) 
+            ux[i] = x[i];
+        return to_string(ux, base);
+    }
+
+    // For negative numbers, calculate the absolute value magnitude.
+    // In two's complement, -x for sint::min() results in the same bit pattern,
+    // which correctly represents the magnitude 2^(N-1) when stored in uint.
+    auto abs_x = -x;
+    uint<N> ux;
+    for (size_t i = 0; i < sint<N>::num_words; ++i) 
+        ux[i] = abs_x[i];
+
+    return "-" + to_string(ux, base);
+}
+
+template <unsigned N>
+inline std::string hex(sint<N> x)
+{
+    return to_string(x, 16);
+}
 
 }  // namespace intx
 
