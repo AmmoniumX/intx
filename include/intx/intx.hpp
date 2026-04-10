@@ -93,7 +93,13 @@ template <unsigned N>
 struct uint;
 
 template <unsigned N>
+using uint_t = uint<N>;
+
+template <unsigned N>
 struct sint;
+
+template <unsigned N>
+using sint_t = sint<N>;
 
 /// Contains result of add/sub/etc with a carry flag.
 template <typename T>
@@ -1163,7 +1169,7 @@ public:
 
     friend constexpr uint operator<<(const uint& x, uint64_t shift) noexcept
     {
-        return intshift<uint, N>(x, shift);
+        return intshift<uint_t, N>(x, shift);
     }
 
     friend constexpr uint operator<<(const uint& x, std::integral auto shift) noexcept
@@ -2148,7 +2154,7 @@ public:
 
     friend constexpr sint operator<<(const sint& x, uint64_t shift) noexcept
     {
-        return intshift<sint, N>(x, shift);
+        return intshift<sint_t, N>(x, shift);
     }
 
     friend constexpr sint operator<<(const sint& x, std::integral auto shift) noexcept
