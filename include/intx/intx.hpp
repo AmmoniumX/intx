@@ -2199,7 +2199,9 @@ public:
     {
         constexpr auto word_bits = sizeof(uint64_t) * 8;
         // Replicate the sign bit across a full word: 0 for positive, all-ones for negative.
-        const auto sign_fill = -static_cast<int64_t>(x[num_words - 1] >> (word_bits - 1));
+        const auto sign_fill = static_cast<uint64_t>(
+            -static_cast<int64_t>(x[num_words - 1] >> (word_bits - 1))
+            );
 
         if (shift >= num_bits) [[unlikely]]
         {
@@ -2245,7 +2247,9 @@ public:
         {
             // Shift amount >= 2^64 >= num_bits: result is all sign bits.
             constexpr auto word_bits = sizeof(uint64_t) * 8;
-            const auto sign_fill = -static_cast<int64_t>(x[num_words - 1] >> (word_bits - 1));
+            const auto sign_fill = static_cast<uint64_t>(
+              -static_cast<int64_t>(x[num_words - 1] >> (word_bits - 1))
+              );
             sint r;
             for (size_t i = 0; i < num_words; ++i)
                 r[i] = sign_fill;
