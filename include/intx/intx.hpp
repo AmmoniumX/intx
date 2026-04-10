@@ -92,6 +92,9 @@ using builtin_int128 = __int128;
 template <unsigned N>
 struct uint;
 
+template <unsigned N>
+struct sint;
+
 /// Contains result of add/sub/etc with a carry flag.
 template <typename T>
 struct result_with_carry
@@ -424,6 +427,55 @@ public:
 };
 
 using uint128 = uint<128>;
+
+template <template <unsigned> class Int, unsigned N>
+constexpr Int<N> intshift(const Int<N>& x, uint64_t shift)
+{
+    if (shift >= Int<N>::num_bits) [[unlikely]]
+        return 0;
+
+    if constexpr (N == 256)
+    {
+        constexpr auto half_bits = Int<N>::num_bits / 2;
+
+        const auto xlo = uint128{x[0], x[1]};
+
+        if (shift < half_bits)
+        {
+            const auto lo = xlo << shift;
+
+            const auto xhi = uint128{x[2], x[3]};
+
+            // Find the part moved from lo to hi.
+            // The shift right here can be invalid:
+            // for shift == 0 => rshift == half_bits.
+            // Split it into 2 valid shifts by (rshift - 1) and 1.
+            const auto rshift = half_bits - shift;
+            const auto lo_overflow = (xlo >> (rshift - 1)) >> 1;
+            const auto hi = (xhi << shift) | lo_overflow;
+            return {lo[0], lo[1], hi[0], hi[1]};
+        }
+
+        const auto hi = xlo << (shift - half_bits);
+        return {0, 0, hi[0], hi[1]};
+    }
+    else
+    {
+        constexpr auto word_bits = sizeof(uint64_t) * 8;
+
+        const auto s = shift % word_bits;
+        const auto skip = static_cast<size_t>(shift / word_bits);
+
+        Int<N> r;
+        uint64_t carry = 0;
+        for (size_t i = 0; i < (Int<N>::num_words - skip); ++i)
+        {
+            r[i + skip] = (x[i] << s) | carry;
+            carry = (x[i] >> (word_bits - s - 1)) >> 1;
+        }
+        return r;
+    }
+}
 
 
 /// Optimized addition.
@@ -1106,52 +1158,12 @@ public:
         return (x < y) ? std::strong_ordering::less : std::strong_ordering::greater;
     }
 
+    template <template <unsigned> class Int, unsigned M>
+    friend constexpr Int<M> intshift(const Int<M>&, uint64_t);
+
     friend constexpr uint operator<<(const uint& x, uint64_t shift) noexcept
     {
-        if (shift >= num_bits) [[unlikely]]
-            return 0;
-
-        if constexpr (N == 256)
-        {
-            constexpr auto half_bits = num_bits / 2;
-
-            const auto xlo = uint128{x[0], x[1]};
-
-            if (shift < half_bits)
-            {
-                const auto lo = xlo << shift;
-
-                const auto xhi = uint128{x[2], x[3]};
-
-                // Find the part moved from lo to hi.
-                // The shift right here can be invalid:
-                // for shift == 0 => rshift == half_bits.
-                // Split it into 2 valid shifts by (rshift - 1) and 1.
-                const auto rshift = half_bits - shift;
-                const auto lo_overflow = (xlo >> (rshift - 1)) >> 1;
-                const auto hi = (xhi << shift) | lo_overflow;
-                return {lo[0], lo[1], hi[0], hi[1]};
-            }
-
-            const auto hi = xlo << (shift - half_bits);
-            return {0, 0, hi[0], hi[1]};
-        }
-        else
-        {
-            constexpr auto word_bits = sizeof(uint64_t) * 8;
-
-            const auto s = shift % word_bits;
-            const auto skip = static_cast<size_t>(shift / word_bits);
-
-            uint r;
-            uint64_t carry = 0;
-            for (size_t i = 0; i < (num_words - skip); ++i)
-            {
-                r[i + skip] = (x[i] << s) | carry;
-                carry = (x[i] >> (word_bits - s - 1)) >> 1;
-            }
-            return r;
-        }
+        return intshift<uint, N>(x, shift);
     }
 
     friend constexpr uint operator<<(const uint& x, std::integral auto shift) noexcept
@@ -1242,6 +1254,7 @@ public:
     constexpr uint& operator<<=(uint shift) noexcept { return *this = *this << shift; }
     constexpr uint& operator>>=(uint shift) noexcept { return *this = *this >> shift; }
 };
+
 
 using uint256 = uint<256>;
 
@@ -2129,52 +2142,13 @@ public:
         return (x < y) ? std::strong_ordering::less : std::strong_ordering::greater;
     }
 
+
+    template <template <unsigned> class Int, unsigned M>
+    friend constexpr Int<M> intshift(const Int<M>&, uint64_t);
+
     friend constexpr sint operator<<(const sint& x, uint64_t shift) noexcept
     {
-        if (shift >= num_bits) [[unlikely]]
-            return 0;
-
-        if constexpr (N == 256)
-        {
-            constexpr auto half_bits = num_bits / 2;
-
-            const auto xlo = uint128{x[0], x[1]};
-
-            if (shift < half_bits)
-            {
-                const auto lo = xlo << shift;
-
-                const auto xhi = uint128{x[2], x[3]};
-
-                // Find the part moved from lo to hi.
-                // The shift right here can be invalid:
-                // for shift == 0 => rshift == half_bits.
-                // Split it into 2 valid shifts by (rshift - 1) and 1.
-                const auto rshift = half_bits - shift;
-                const auto lo_overflow = (xlo >> (rshift - 1)) >> 1;
-                const auto hi = (xhi << shift) | lo_overflow;
-                return {lo[0], lo[1], hi[0], hi[1]};
-            }
-
-            const auto hi = xlo << (shift - half_bits);
-            return {0, 0, hi[0], hi[1]};
-        }
-        else
-        {
-            constexpr auto word_bits = sizeof(uint64_t) * 8;
-
-            const auto s = shift % word_bits;
-            const auto skip = static_cast<size_t>(shift / word_bits);
-
-            sint r;
-            uint64_t carry = 0;
-            for (size_t i = 0; i < (num_words - skip); ++i)
-            {
-                r[i + skip] = (x[i] << s) | carry;
-                carry = (x[i] >> (word_bits - s - 1)) >> 1;
-            }
-            return r;
-        }
+        return intshift<sint, N>(x, shift);
     }
 
     friend constexpr sint operator<<(const sint& x, std::integral auto shift) noexcept
@@ -2264,6 +2238,7 @@ public:
 using int128 = sint<128>;
 using int256 = sint<256>;
 using int512 = sint<512>;
+
 
 template <unsigned N>
 inline std::string to_string(sint<N> x, int base = 10)
