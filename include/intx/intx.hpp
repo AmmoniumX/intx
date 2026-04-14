@@ -63,6 +63,13 @@
     #define INTX_HAS_BUILTIN_INT128 0
 #endif
 
+
+#if defined(__cpp_deleted_function) && __cpp_deleted_function >= 202403L
+    #define INTX_DELETE(X) delete (X)
+#else
+    #define INTX_DELETE(X) delete
+#endif
+
 namespace intx
 {
 /// Mark a possible code path as unreachable (invokes undefined behavior).
@@ -984,11 +991,27 @@ public:
       : words_{static_cast<uint64_t>(v)...}
     {}
 
+
+    // Fixed size overloads for spans, skips runtime checks
+    template <std::size_t Extent>
+        requires(Extent > num_words)
+    constexpr explicit uint([[maybe_unused]] std::span<const uint64_t, Extent> words) noexcept =
+        INTX_DELETE("span extent goes outside the range for uint");
+
     /// Constructs from words with words[0] being the least significant word.
     /// The size of the span must be less than or equal to num_words.
-    constexpr explicit uint(std::span<const uint64_t> words) noexcept
+    template <>
+    constexpr explicit uint(std::span<const uint64_t, std::dynamic_extent> words) noexcept
     {
         INTX_REQUIRE(words.size() <= num_words);
+        std::ranges::copy(words, words_);
+    }
+
+    // Safe extent
+    template <std::size_t Extent>
+        requires(Extent <= num_words)
+    constexpr explicit uint(std::span<const uint64_t, Extent> words) noexcept
+    {
         std::ranges::copy(words, words_);
     }
 
@@ -1990,11 +2013,26 @@ public:
       : internal{static_cast<uint64_t>(v)...}
     {}
 
+    // Fixed size overloads for spans, skips runtime checks
+    template <std::size_t Extent>
+        requires(Extent > num_words)
+    constexpr explicit sint([[maybe_unused]] std::span<const uint64_t, Extent> words) noexcept =
+        INTX_DELETE("span extent goes outside the range for sint");
+
     /// Constructs from words with words[0] being the least significant word.
     /// The size of the span must be less than or equal to num_words.
-    constexpr explicit sint(std::span<const uint64_t> words) noexcept
+    template <>
+    constexpr explicit sint(std::span<const uint64_t, std::dynamic_extent> words) noexcept
     {
         INTX_REQUIRE(words.size() <= num_words);
+        std::ranges::copy(words, words_);
+    }
+
+    // Safe extent
+    template <std::size_t Extent>
+        requires(Extent <= num_words)
+    constexpr explicit sint(std::span<const uint64_t, Extent> words) noexcept
+    {
         std::ranges::copy(words, words_);
     }
 
