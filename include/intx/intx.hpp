@@ -22,9 +22,6 @@
 #include <string>
 #include <tuple>
 #include <type_traits>
-#if defined(__cpp_lib_unreachable)
-    #include <utility>  // std::unreachable
-#endif
 
 #ifdef _MSC_VER
     #pragma warning(push)
@@ -63,21 +60,13 @@
     #define INTX_HAS_BUILTIN_INT128 0
 #endif
 
-
-#if defined(__cpp_deleted_function) && __cpp_deleted_function >= 202403L
-    #define INTX_DELETE(X) delete (X)
-#else
-    #define INTX_DELETE(X) delete
-#endif
-
 namespace intx
 {
 /// Mark a possible code path as unreachable (invokes undefined behavior).
+/// TODO(C++23): Use std::unreachable().
 [[noreturn]] inline void unreachable() noexcept
 {
-#if defined(__cpp_lib_unreachable)
-    std::unreachable();
-#elif __has_builtin(__builtin_unreachable)
+#if __has_builtin(__builtin_unreachable)
     __builtin_unreachable();
 #elif defined(_MSC_VER)
     __assume(false);
@@ -100,13 +89,7 @@ template <unsigned N>
 struct uint;
 
 template <unsigned N>
-using uint_t = uint<N>;
-
-template <unsigned N>
 struct sint;
-
-template <unsigned N>
-using sint_t = sint<N>;
 
 /// Contains result of add/sub/etc with a carry flag.
 template <typename T>
@@ -440,56 +423,6 @@ public:
 };
 
 using uint128 = uint<128>;
-
-template <template <unsigned> class Int, unsigned N>
-constexpr Int<N> intshift(const Int<N>& x, uint64_t shift)
-{
-    if (shift >= Int<N>::num_bits) [[unlikely]]
-        return 0;
-
-    if constexpr (N == 256)
-    {
-        constexpr auto half_bits = Int<N>::num_bits / 2;
-
-        const auto xlo = uint128{x[0], x[1]};
-
-        if (shift < half_bits)
-        {
-            const auto lo = xlo << shift;
-
-            const auto xhi = uint128{x[2], x[3]};
-
-            // Find the part moved from lo to hi.
-            // The shift right here can be invalid:
-            // for shift == 0 => rshift == half_bits.
-            // Split it into 2 valid shifts by (rshift - 1) and 1.
-            const auto rshift = half_bits - shift;
-            const auto lo_overflow = (xlo >> (rshift - 1)) >> 1;
-            const auto hi = (xhi << shift) | lo_overflow;
-            return {lo[0], lo[1], hi[0], hi[1]};
-        }
-
-        const auto hi = xlo << (shift - half_bits);
-        return {0, 0, hi[0], hi[1]};
-    }
-    else
-    {
-        constexpr auto word_bits = sizeof(uint64_t) * 8;
-
-        const auto s = shift % word_bits;
-        const auto skip = static_cast<size_t>(shift / word_bits);
-
-        Int<N> r;
-        uint64_t carry = 0;
-        for (size_t i = 0; i < (Int<N>::num_words - skip); ++i)
-        {
-            r[i + skip] = (x[i] << s) | carry;
-            carry = (x[i] >> (word_bits - s - 1)) >> 1;
-        }
-        return r;
-    }
-}
-
 
 /// Optimized addition.
 ///
@@ -946,7 +879,6 @@ inline std::string to_string(uint<N> x, int base = 10)
     return s;
 }
 
-
 template <unsigned N>
 inline std::string hex(uint<N> x)
 {
@@ -994,20 +926,11 @@ public:
 
     /// Constructs from words with words[0] being the least significant word.
     /// The size of the span must be less than or equal to num_words.
-    template <std::size_t Extent>
-        requires(Extent == std::dynamic_extent || Extent <= num_words)
-    constexpr explicit uint(std::span<const uint64_t, Extent> words) noexcept
+    constexpr explicit uint(std::span<const uint64_t> words) noexcept
     {
-        if constexpr (Extent == std::dynamic_extent)
-            INTX_REQUIRE(words.size() <= num_words);
+        INTX_REQUIRE(words.size() <= num_words);
         std::ranges::copy(words, words_);
     }
-
-    // Deleted overload
-    template <std::size_t Extent>
-        requires(Extent != std::dynamic_extent && Extent > num_words)
-    constexpr explicit uint([[maybe_unused]] std::span<const uint64_t, Extent> words) noexcept =
-        INTX_DELETE("span extent goes outside the range for uint");
 
     constexpr uint64_t& operator[](size_t i) noexcept { return words_[i]; }
 
@@ -1181,12 +1104,52 @@ public:
         return (x < y) ? std::strong_ordering::less : std::strong_ordering::greater;
     }
 
-    template <template <unsigned> class Int, unsigned M>
-    friend constexpr Int<M> intshift(const Int<M>&, uint64_t);
-
     friend constexpr uint operator<<(const uint& x, uint64_t shift) noexcept
     {
-        return intshift<uint_t, N>(x, shift);
+        if (shift >= num_bits) [[unlikely]]
+            return 0;
+
+        if constexpr (N == 256)
+        {
+            constexpr auto half_bits = num_bits / 2;
+
+            const auto xlo = uint128{x[0], x[1]};
+
+            if (shift < half_bits)
+            {
+                const auto lo = xlo << shift;
+
+                const auto xhi = uint128{x[2], x[3]};
+
+                // Find the part moved from lo to hi.
+                // The shift right here can be invalid:
+                // for shift == 0 => rshift == half_bits.
+                // Split it into 2 valid shifts by (rshift - 1) and 1.
+                const auto rshift = half_bits - shift;
+                const auto lo_overflow = (xlo >> (rshift - 1)) >> 1;
+                const auto hi = (xhi << shift) | lo_overflow;
+                return {lo[0], lo[1], hi[0], hi[1]};
+            }
+
+            const auto hi = xlo << (shift - half_bits);
+            return {0, 0, hi[0], hi[1]};
+        }
+        else
+        {
+            constexpr auto word_bits = sizeof(uint64_t) * 8;
+
+            const auto s = shift % word_bits;
+            const auto skip = static_cast<size_t>(shift / word_bits);
+
+            uint r;
+            uint64_t carry = 0;
+            for (size_t i = 0; i < (num_words - skip); ++i)
+            {
+                r[i + skip] = (x[i] << s) | carry;
+                carry = (x[i] >> (word_bits - s - 1)) >> 1;
+            }
+            return r;
+        }
     }
 
     friend constexpr uint operator<<(const uint& x, std::integral auto shift) noexcept
@@ -1277,7 +1240,6 @@ public:
     constexpr uint& operator<<=(uint shift) noexcept { return *this = *this << shift; }
     constexpr uint& operator>>=(uint shift) noexcept { return *this = *this >> shift; }
 };
-
 
 using uint256 = uint<256>;
 
@@ -2010,20 +1972,11 @@ public:
 
     /// Constructs from words with words[0] being the least significant word.
     /// The size of the span must be less than or equal to num_words.
-    template <std::size_t Extent>
-        requires(Extent == std::dynamic_extent || Extent <= num_words)
-    constexpr explicit sint(std::span<const uint64_t, Extent> words) noexcept
+    constexpr explicit sint(std::span<const uint64_t> words) noexcept
     {
-        if constexpr (Extent == std::dynamic_extent)
-            INTX_REQUIRE(words.size() <= num_words);
+        INTX_REQUIRE(words.size() <= num_words);
         std::ranges::copy(words, words_);
     }
-
-    // Deleted overload
-    template <std::size_t Extent>
-        requires(Extent != std::dynamic_extent && Extent > num_words)
-    constexpr explicit sint([[maybe_unused]] std::span<const uint64_t, Extent> words) noexcept =
-        INTX_DELETE("span extent goes outside the range for sint");
 
     // This is just to get each words, it won't mean much by themselves since it's
     // part of a signed type
@@ -2175,13 +2128,52 @@ public:
         return (x < y) ? std::strong_ordering::less : std::strong_ordering::greater;
     }
 
-
-    template <template <unsigned> class Int, unsigned M>
-    friend constexpr Int<M> intshift(const Int<M>&, uint64_t);
-
     friend constexpr sint operator<<(const sint& x, uint64_t shift) noexcept
     {
-        return intshift<sint_t, N>(x, shift);
+        if (shift >= num_bits) [[unlikely]]
+            return 0;
+
+        if constexpr (N == 256)
+        {
+            constexpr auto half_bits = num_bits / 2;
+
+            const auto xlo = uint128{x[0], x[1]};
+
+            if (shift < half_bits)
+            {
+                const auto lo = xlo << shift;
+
+                const auto xhi = uint128{x[2], x[3]};
+
+                // Find the part moved from lo to hi.
+                // The shift right here can be invalid:
+                // for shift == 0 => rshift == half_bits.
+                // Split it into 2 valid shifts by (rshift - 1) and 1.
+                const auto rshift = half_bits - shift;
+                const auto lo_overflow = (xlo >> (rshift - 1)) >> 1;
+                const auto hi = (xhi << shift) | lo_overflow;
+                return {lo[0], lo[1], hi[0], hi[1]};
+            }
+
+            const auto hi = xlo << (shift - half_bits);
+            return {0, 0, hi[0], hi[1]};
+        }
+        else
+        {
+            constexpr auto word_bits = sizeof(uint64_t) * 8;
+
+            const auto s = shift % word_bits;
+            const auto skip = static_cast<size_t>(shift / word_bits);
+
+            sint r;
+            uint64_t carry = 0;
+            for (size_t i = 0; i < (num_words - skip); ++i)
+            {
+                r[i + skip] = (x[i] << s) | carry;
+                carry = (x[i] >> (word_bits - s - 1)) >> 1;
+            }
+            return r;
+        }
     }
 
     friend constexpr sint operator<<(const sint& x, std::integral auto shift) noexcept
